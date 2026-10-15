@@ -1,0 +1,19 @@
+# dsh-flowchart bundle patch: inserts the `flowchart` tool process-wide.
+#
+# The entry name is PATH-RELATIVE on purpose. DSH anchors a relative `name:` to
+# the directory of the patch file that declared it, so this row always loads
+# this bundle's own `index.js` whatever the package folder is called. A bare
+# package name would have to match the installed folder name instead, which
+# couples this file to the npm package name.
+#
+# To keep the tool out of a composition, override this row by id in a later
+# patch layer (`- id: flowchart` with `disabled: true`) rather than duplicating
+# it: DSH registers tools by name and a second `flowchart` row fails with
+# `tool "flowchart" is already registered in this scope`.
+#
+# The browser half needs no row here. package.json declares
+# `dsh.client.platform: web` and `exports["./client"]`, so the same Loader row
+# is scanned into the client module graph and served from `/plugins`.
+- insert:
+    - id: flowchart
+      name: './index.js'

@@ -1,0 +1,3 @@
+# Keep the source and the built bundle text/line-ending stable across platforms:
+# lib/client.js is compared byte-for-byte by the build's purity check.
+* text=auto eol=lf

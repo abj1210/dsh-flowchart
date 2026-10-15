@@ -1,0 +1,10 @@
+# The dev copy of esbuild is vendored so `node build.mjs` works offline.
+node_modules/
+
+# Generated previews from the smoke test.
+test/*.svg
+
+# Editor and OS noise.
+.DS_Store
+Thumbs.db
+*.log
