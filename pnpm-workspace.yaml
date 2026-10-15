@@ -1,0 +1,5 @@
+# pnpm 11 asks before running a dependency's install script. esbuild's postinstall
+# is what fetches its platform binary, so without this a fresh clone installs
+# esbuild but `node build.mjs` still cannot run it.
+allowBuilds:
+  esbuild: true

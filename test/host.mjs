@@ -11,9 +11,11 @@
 
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { toolDefinition, buildGraphFromArgs, apply } from '../index.js'
+import { renderSvg } from '../lib/graph.cjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
@@ -44,12 +46,26 @@ const definition = toolDefinition()
  * Load DSH's real schema compiler, if this machine has the checkout. Tests that
  * depend on it are skipped rather than failed when it is absent, so the plugin's
  * own suite still runs on a machine that only has the app installed.
+ *
+ * The search is deliberately relative to the home directory rather than pinned
+ * to one developer's absolute path: a hard-coded path silently skips the schema
+ * checks on every other machine, and those checks are the only regression cover
+ * for the `schema.required` trap described in the README.
  * @returns the module, or null.
  */
 async function loadDshTools() {
+  const home = homedir()
   const candidates = [
     process.env.DSH_TOOLS_LIB,
-    'C:/Users/WenJiaxun/Documents/GitHub/deepseek-harness/packages/core/tools/lib/index.js',
+    ...(process.env.DSH_CHECKOUT === undefined
+      ? []
+      : [join(process.env.DSH_CHECKOUT, 'packages/core/tools/lib/index.js')]),
+    join(home, 'Documents/GitHub/deepseek-harness/packages/core/tools/lib/index.js'),
+    join(home, 'Documents/deepseek-harness/packages/core/tools/lib/index.js'),
+    join(home, 'deepseek-harness/packages/core/tools/lib/index.js'),
+    join(home, 'src/deepseek-harness/packages/core/tools/lib/index.js'),
+    join(root, '../deepseek-harness/packages/core/tools/lib/index.js'),
+    join(root, '../../deepseek-harness/packages/core/tools/lib/index.js'),
   ].filter(candidate => typeof candidate === 'string' && candidate !== '')
   for (const candidate of candidates) {
     if (!existsSync(candidate)) continue
@@ -80,7 +96,38 @@ check('constrains the direction', JSON.stringify(definition.parameters.direction
 check('declares an output renderer', typeof definition.output.render === 'function')
 check('declares presentation metadata', typeof definition.output.presentationMeta === 'function')
 
-console.log('schema compilation (DSH DSL)')
+console.log('schema shape (the DSL\'s requiredness contract)')
+/**
+ * Walk a declared schema for the one idiom DSH's value-schema DSL rejects: a
+ * root-level `required: [...]` array (a parameter-root JSON Schema idiom). It
+ * surfaces as the provider refusing the whole tool with `Invalid schema for
+ * function 'flowchart'`, which is a long way from the line that caused it.
+ *
+ * This runs on every machine, including ones with no DSH checkout, so the trap
+ * the README documents has regression cover without needing `@deepseek-ai/dsh-tools`.
+ * @param schema - the declared value schema.
+ * @returns the offending paths, empty when the schema is clean.
+ */
+function findRootRequiredArrays(schema) {
+  const found = []
+  const visit = (node, path) => {
+    if (node === null || typeof node !== 'object' || Array.isArray(node)) return
+    if (Array.isArray(node.required)) found.push(path)
+    for (const [key, child] of Object.entries(node)) visit(child, `${path}.${key}`)
+  }
+  visit(schema, 'schema')
+  return found
+}
+check('declares requiredness per property, never a root `required` array',
+  findRootRequiredArrays(definition.parameters).length === 0
+  && findRootRequiredArrays(definition.output.schema).length === 0,
+  [...findRootRequiredArrays(definition.parameters), ...findRootRequiredArrays(definition.output.schema)].join(', '))
+check('marks exactly the flow text as required',
+  Object.entries(definition.parameters).filter(([, value]) => value?.required === true).map(([key]) => key).join(',') === 'text')
+check('marks every output field as required',
+  Object.entries(definition.output.schema.properties)
+    .filter(([, value]) => value?.required !== true).length === 0)
+
 if (dshTools === null) {
   console.log('  skip @deepseek-ai/dsh-tools is not resolvable; set DSH_TOOLS_LIB to its lib/index.js')
 } else {
@@ -134,8 +181,46 @@ check('rejects empty text', (() => {
 check('rejects text without any node', (() => {
   try { buildGraphFromArgs({ text: '%% only a comment' }); return false } catch (error) { return /no nodes were recognised/u.test(error.message) }
 })())
-check('warns about an unknown node id instead of throwing',
-  buildGraphFromArgs({ text: 'A --> B\nB --> Z' }).warnings.length === 0 || true)
+check('reports a line it could not read instead of hiding it', (() => {
+  const noisy = buildGraphFromArgs({ text: 'A[一] --> B[二]\n??? not a step ???\nC --> D' })
+  return noisy.warnings.some(warning => warning.includes('??? not a step ???'))
+})(), 'an unreadable line must reach the warnings the model reads back')
+check('keeps reading the rest of a flow that contains junk', (() => {
+  const noisy = buildGraphFromArgs({ text: 'A[一] --> B[二]\n??? not a step ???\nC[三] --> D[四]' })
+  return Object.keys(noisy.nodes).length === 4 && noisy.edges.length === 2
+})())
+check('warns when the node budget drops edges', (() => {
+  const text = `${Array.from({ length: 70 }, (_, i) => `N${i}[节${i}]`).join('\n')}\n`
+    + Array.from({ length: 69 }, (_, i) => `N${i} --> N${i + 1}`).join('\n')
+  const clipped = buildGraphFromArgs({ text })
+  return clipped.warnings.some(warning => warning.includes('unknown node id'))
+})(), 'edges past the node cap must be reported, not silently dropped')
+
+console.log('edge styles')
+check('keeps a thick edge through the build', (() => {
+  const thick = buildGraphFromArgs({ text: 'A[一] ==> B[二]' })
+  return thick.edges.length === 1 && thick.edges[0].thick === true
+})(), 'the parser sets `thick`, so `buildGraph` has to carry it')
+check('draws a thick edge thicker than a plain one', (() => {
+  const thick = renderSvg(buildGraphFromArgs({ text: 'A[一] ==> B[二]' }))
+  const plain = renderSvg(buildGraphFromArgs({ text: 'A[一] --> B[二]' }))
+  return /<path class="edge thick"/u.test(thick) && !/<path class="edge thick"/u.test(plain)
+})(), 'the .edge.thick rule only bites when the class is actually on the path')
+check('keeps a dashed edge dashed', buildGraphFromArgs({ text: 'A -.-> B' }).edges[0].dashed === true)
+check('draws no label furniture on an unlabelled edge', (() => {
+  // Count rendered elements, not the string: the stylesheet always names
+  // `.edge-label`, so a substring test would pass no matter what is drawn.
+  const svg = renderSvg(buildGraphFromArgs({ text: 'A[一] --> B[二]' }))
+  return !/<rect class="edge-label-bg"/u.test(svg) && !/<text class="edge-label"/u.test(svg)
+})())
+check('draws label furniture on a labelled edge', (() => {
+  const svg = renderSvg(buildGraphFromArgs({ text: 'A[一] -->|是| B[二]' }))
+  return /<rect class="edge-label-bg"/u.test(svg) && svg.includes('>是</text>')
+})())
+check('gives an unlabelled edge a tooltip without an empty parenthesis', (() => {
+  const svg = renderSvg(buildGraphFromArgs({ text: 'A[一] --> B[二]' }))
+  return !/\(\s*\)/u.test(svg)
+})())
 
 console.log('shipped files')
 const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))

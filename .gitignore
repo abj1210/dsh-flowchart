@@ -1,5 +1,12 @@
-# The dev copy of esbuild is vendored so `node build.mjs` works offline.
+# esbuild is an ordinary dev dependency (`pnpm install`), not a vendored copy:
+# anything under node_modules/ is by definition not in the repo.
 node_modules/
+
+# pnpm's lockfile. The only dev dependency is esbuild and the lockfile format
+# moves with the pnpm major, so it is not worth pinning here. The build approval
+# in pnpm-workspace.yaml *is* tracked: without it pnpm 11 installs esbuild but
+# not its platform binary, and `node build.mjs` then cannot run.
+pnpm-lock.yaml
 
 # Generated previews from the smoke test.
 test/*.svg

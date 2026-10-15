@@ -33,12 +33,18 @@ export function buildGraphFromArgs(args) {
   if (parsed.nodes.length === 0) {
     throw new Error('flowchart: no nodes were recognised in `text`; write one step per line, e.g. "A[开始] --> B{判断}"')
   }
-  return buildGraph({
+  const graph = buildGraph({
     title: args.title ?? parsed.title,
     direction: args.direction ?? parsed.direction,
     nodes: parsed.nodes,
     edges: parsed.edges,
   })
+  // The parser reports rather than throws: a line it could not read is a hole in
+  // the drawing, so carry it into the warnings the model reads back.
+  for (const line of parsed.unparsed ?? []) {
+    graph.warnings.push(`could not read this line: ${line}`)
+  }
+  return graph
 }
 
 /**

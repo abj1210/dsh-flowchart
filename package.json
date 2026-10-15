@@ -18,6 +18,8 @@
   "files": [
     "index.js",
     "lib",
+    "src",
+    "build.mjs",
     "cordis.patch.yml"
   ],
   "scripts": {
@@ -40,6 +42,6 @@
     "@deepseek-ai/cordis": "*"
   },
   "devDependencies": {
-    "esbuild": "^0.28.1"
+    "esbuild": "^0.28.2"
   }
 }

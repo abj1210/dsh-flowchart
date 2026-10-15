@@ -246,9 +246,25 @@ check('shows a pending card while the call runs',
 console.log('payload narrowing')
 check('rejects a foreign metadata shape', face.readMeta({ v: 2, svg: 'x' }) === null)
 check('rejects a non-object', face.readMeta('nope') === null)
+// `edges` is the field whose absence used to reach toFlowText, which iterates it
+// before the component decides whether to show the source at all — so a payload
+// missing it blanked the whole tab body instead of falling back to "not loaded".
+check('rejects a v1 payload with no edges', face.readMeta({ ...payload, edges: undefined }) === null,
+  'toFlowText iterates `edges`; a payload without it must not get that far')
+check('rejects a v1 payload with no title', face.readMeta({ ...payload, title: undefined }) === null)
+check('rejects a v1 payload with a non-object node list',
+  face.readMeta({ ...payload, nodes: 'nope' }) === null)
 check('accepts a v1 payload', face.readMeta(payload)?.title === '发布流程')
 check('round-trips to Mermaid source', face.toFlowText(payload).startsWith('flowchart TB')
   && face.toFlowText(payload).includes('b -->|是| c'), face.toFlowText(payload))
+check('writes a thick edge back as ==>', (() => {
+  const thick = {
+    ...payload,
+    edges: [{ from: 'a', to: 'b', thick: true }, { from: 'b', to: 'c', dashed: true }],
+  }
+  const text = face.toFlowText(thick)
+  return text.includes('a ==> b') && text.includes('b -.-> c')
+})(), 'the source view has to be able to say what the picture shows')
 
 console.log('')
 if (failures > 0) {

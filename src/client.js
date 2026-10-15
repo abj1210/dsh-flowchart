@@ -59,12 +59,18 @@ const CSS = [
 
 /**
  * Read a payload a session record carried.
+ *
+ * Mirrors `lib/meta.cjs`'s `readMeta`: the two halves narrow the same value, so
+ * the checks have to agree on what a payload is. A field that one accepts and
+ * the other rejects is a tab that renders in one place and throws in another.
  * @param value - `ToolResultNode.meta`, of unknown shape.
  * @returns the payload, or null when it is not one.
  */
 function readMeta(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
-  if (value.v !== 1 || typeof value.svg !== 'string' || !Array.isArray(value.nodes)) return null
+  if (value.v !== 1) return null
+  if (typeof value.svg !== 'string' || typeof value.title !== 'string') return null
+  if (!Array.isArray(value.nodes) || !Array.isArray(value.edges)) return null
   return value
 }
 
@@ -84,7 +90,7 @@ function toFlowText(payload) {
     else lines.push(`${node.id}[${label}]`)
   }
   for (const edge of payload.edges) {
-    const arrow = edge.dashed === true ? '-.->' : '-->'
+    const arrow = edge.dashed === true ? '-.->' : edge.thick === true ? '==>' : '-->'
     const label = edge.label === undefined || edge.label === '' ? '' : `|${edge.label}|`
     lines.push(`${edge.from} ${arrow}${label} ${edge.to}`)
   }

@@ -57,15 +57,21 @@ watcher, which stat-polls every graph row's bundle.
 ## Develop
 
 ```sh
+pnpm install        # once — brings in esbuild, the only dev dependency
 node build.mjs      # src/client.js -> lib/client.js (esbuild, wrapped for the page)
 node test/all.mjs   # all three suites
 ```
 
-`build.mjs` resolves esbuild from this package's own `node_modules` — a copy is
-vendored there so the build needs no network — and refuses to emit a bundle that
-asks the module table for anything outside `react`, `react/jsx-runtime` and the
-client service packages. That check exists because the failure it prevents is a
-`require` miss in the browser, far from the build.
+`build.mjs` resolves esbuild from this package's own `node_modules`, or from
+`ESBUILD_BINARY_PATH` when you would rather point it at an executable, and
+refuses to emit a bundle that asks the module table for anything outside `react`,
+`react/jsx-runtime` and the client service packages. That check exists because
+the failure it prevents is a `require` miss in the browser, far from the build.
+
+esbuild is **not** vendored into the repo — it is a normal dev dependency, so a
+fresh clone has to run `pnpm install` before `node build.mjs` works. The shipped
+`lib/client.js` is committed, so the plugin itself runs fine without ever
+building.
 
 ### Tests
 
@@ -76,8 +82,54 @@ client service packages. That check exists because the failure it prevents is a
 | `test/client.mjs` | `lib/client.js` loaded the way the page loads it: a fake `__ModuleLoader__`, a `require` that answers only the platform words, and React stubbed just enough to render |
 
 `test/host.mjs` compiles the schemas through the built `@deepseek-ai/dsh-tools`
-of a DSH checkout when it finds one (set `DSH_TOOLS_LIB` to point at it
-elsewhere); without one it skips those checks instead of failing.
+of a DSH checkout when it finds one — searched relative to `$HOME` rather than a
+hard-coded path, and overridable with `DSH_TOOLS_LIB` or `DSH_CHECKOUT`; without
+one it skips those checks instead of failing. It prints `skip` when that happens,
+so a green run that skipped the schema checks is visible rather than implied.
+
+## The Mermaid subset
+
+`text` is read line by line; anything the parser cannot read is reported back in
+the tool result's `warnings` rather than drawn, so a typo shows up as a warning
+instead of a hole in the picture. At least one step has to be readable — a `text`
+holding only headers (`flowchart LR`, `title: …`) is refused with
+`no nodes were recognised`, because there is nothing to draw.
+
+| syntax | result |
+| --- | --- |
+| `A --> B` | plain edge |
+| `A -.-> B` | dashed edge |
+| `A ==> B` | thick edge |
+| `A ----> B` | plain edge (extra dashes ignored) |
+| `A -->\|是\| B`, `A -- 是 --> B` | labelled edge — **ASCII pipes only**. With a full-width pipe (`-->｜是｜`) the edge is not drawn and the line is warned about; only a stray node survives. |
+| `A[标签]` | process box |
+| `A{判断}` | decision diamond |
+| `A([开始])`, `A([结束])` | rounded terminal |
+| `A[/输入/]` | parallelogram (io) |
+| `A[(数据)]` | skewed box (data) |
+| `A(标签)` | process box |
+| `flowchart LR` / `flowchart TB` / `graph TD` | sets the direction (the `direction` parameter overrides it) |
+| `title: 我的图` | sets the title (ASCII or `：`); without it the title falls back to the first node's label |
+| `%% comment` | ignored |
+| `subgraph … end`, `classDef`, `class`, `linkStyle`, `style`, `click` | the keyword line is ignored; `subgraph`/`end` wrappers are dropped and the steps inside still parse |
+| node ids | letters, digits (not leading), `_ - .` and CJK; the id character set is what constrains a label, so a label is written bare |
+| `A["my label"]` | the quotes are **kept** — they are drawn as part of the label, not stripped, so a quoted label reads `"my label"` in the picture |
+| `A[第一行<br/>第二行]` | **not** a line break — `<br/>` is escaped and drawn literally as those six characters. Nothing writes a newline into a label; a label wider than `WRAP_W` is wrapped onto extra lines automatically, and that is the only way a node gets more than one line. |
+
+The following are **not** supported. A line the parser cannot read in full is
+collected rather than guessed at, so it comes back as a warning (and the tool
+fails outright when *nothing* was recognised). That is the loud path: `A --- B`
+(open link), `A --x B` and `A --o B` (cross and circle arrowheads), `A === B`
+(thick open link — note `==>` *is* supported), `A -> B` (single dash),
+`A[开始]:::big` (class attachment), numeric-leading ids (`1[a]`), emoji ids,
+full-width pipes, and Unicode arrows such as `→`.
+
+Two constructs degrade **silently** instead, and are worth knowing about. The
+reader is line-oriented, so a `subgraph` header is discarded without a warning,
+and putting a whole flow on one line (`graph TD; A --> B; B --> C`) loses
+everything — the leading keyword makes the reader skip the line. Write one step
+per line. A trailing `;` is fine and is stripped; a `;` in the middle leaves the
+line unreadable, which is at least reported.
 
 ## Two contracts worth knowing
 
